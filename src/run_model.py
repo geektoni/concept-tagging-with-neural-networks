@@ -16,6 +16,9 @@ import data_manager
 from data_manager import PytorchDataset, w2v_matrix_vocab_generator
 from models import lstm, gru, rnn, lstm2ch, encoder, attention, conv, fcinit, lstmcrf
 
+from ray import tune
+from ray.tune import track
+
 
 def worker_init(*args):
     """
@@ -36,7 +39,7 @@ def predict(model, data_to_predict):
     """
     y_predicted = []
 
-    dataloader = DataLoader(data_to_predict, 1, shuffle=False, num_workers=1, drop_last=False, pin_memory=True,
+    dataloader = DataLoader(data_to_predict, 1, shuffle=False, num_workers=0, drop_last=False, pin_memory=True,
                             collate_fn=lambda x: x, worker_init_fn=worker_init)
     for batch in dataloader:
         current = []
@@ -85,7 +88,7 @@ def evaluate_model(dev_data, model, class_dict, batch_size):
     y_predicted = []
     y_true = []
 
-    dataloader = DataLoader(dev_data, batch_size, shuffle=False, num_workers=1, drop_last=False, pin_memory=True,
+    dataloader = DataLoader(dev_data, batch_size, shuffle=False, num_workers=0, drop_last=False, pin_memory=True,
                             collate_fn=lambda x: x, worker_init_fn=worker_init)
 
     for batch in dataloader:
@@ -123,8 +126,13 @@ def evaluate_model(dev_data, model, class_dict, batch_size):
     os.system("../output/conlleval.pl < ../output/dev_pred.txt | head -n2")
     os.system("rm ../output/dev_pred.txt")
 
+def train_model_tune(config):
+    return train_model(config["train_data"], config["model"], config["class_dict"],
+                       config["test_data"], config["params"]["batch"], config["lr"],
+                       config["params"]["epochs"], config["decay"], ray=True)
 
-def train_model(train_data, model, class_dict, dev_data, batch_size, lr, epochs, decay=0.0):
+
+def train_model(train_data, model, class_dict, dev_data, batch_size, lr, epochs, decay=0.0, ray=False):
     """
     Trains a model and prints error, precision, recall and f1 while doing so, if dev data is passed
     the model is going to be evaluated on it every epoch.
@@ -145,7 +153,7 @@ def train_model(train_data, model, class_dict, dev_data, batch_size, lr, epochs,
 
     starting_time = time.time()
 
-    dataloader = DataLoader(train_data, batch_size, shuffle=True, num_workers=1, drop_last=False, pin_memory=True,
+    dataloader = DataLoader(train_data, batch_size, shuffle=True, num_workers=0, drop_last=False, pin_memory=True,
                             collate_fn=lambda x: x, worker_init_fn=worker_init)
 
     for epoch in range(epochs):
@@ -187,6 +195,9 @@ def train_model(train_data, model, class_dict, dev_data, batch_size, lr, epochs,
             model.zero_grad()
             # update current epoch train_data
             error.append(loss.item())
+
+            if ray:
+                tune.track.log(loss=np.mean(error))
 
         scheduler.step(np.mean(error))
 
@@ -249,7 +260,7 @@ def parse_args(args):
         opts, args = getopt.getopt(args, "",
                                    ["train=", "test=", "w2v=", "model=", "c2v=", "write_results=", "save_model=", "dev",
                                     "help", "batch=", "bidirectional", "unfreeze", "decay=", "drop=", "embedding_norm=",
-                                    "epochs=", "hidden_size=", "lr="])
+                                    "epochs=", "hidden_size=", "lr=", "ray"])
     except getopt.GetoptError as err:
         # print help information and exit:
         print(err)
@@ -310,6 +321,8 @@ def parse_args(args):
     lr = float(opts.get("--lr", 0.001))
     assert lr > 0, "learning rate should be greater than 0"
 
+    ray = "--ray" in opts
+
     res = dict()
     res["train"] = train
     res["test"] = test
@@ -328,6 +341,7 @@ def parse_args(args):
     res["epochs"] = epochs
     res["hidden_size"] = hidden_size
     res["lr"] = lr
+    res["ray"] = ray
 
     print("-------------")
     print("Running with the following params:")
@@ -444,13 +458,33 @@ if __name__ == "__main__":
     train_data = PytorchDataset(train_df, init_data_transform, run_data_transform)
     test_data = PytorchDataset(test_df, init_data_transform)  # notice that there is no run_data_transform for test data
 
+    search_space = {
+        "train_data": train_data,
+        "model": model,
+        "class_dict": class_dict,
+        "test_data": test_data,
+        "params": params,
+        "lr": tune.grid_search([0.0001, 0.001, 0.01, 0.1]),
+        "decay": tune.grid_search([0.0001, 0.001, 0.01, 0.1])
+    }
+
     if params["dev"]:
         print("training in dev mode")
         train_model(train_data, model, class_dict, test_data, params["batch"], params["lr"], params["epochs"],
                     params["decay"])
     else:
         print("training")
-        train_model(train_data, model, class_dict, None, params["batch"], params["lr"], params["epochs"],
+
+        if params["ray"]:
+            analysis = tune.run(
+                train_model_tune, config=search_space)
+
+            print("Best config: ", analysis.get_best_config(metric="mean_accuracy"))
+
+            # Get a dataframe for analyzing trial results.
+            df = analysis.dataframe()
+        else:
+            train_model(train_data, model, class_dict, None, params["batch"], params["lr"], params["epochs"],
                     params["decay"])
 
     print("testing")
