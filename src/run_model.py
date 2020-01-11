@@ -260,7 +260,7 @@ def parse_args(args):
         opts, args = getopt.getopt(args, "",
                                    ["train=", "test=", "w2v=", "model=", "c2v=", "write_results=", "save_model=", "dev",
                                     "help", "batch=", "bidirectional", "unfreeze", "decay=", "drop=", "embedding_norm=",
-                                    "epochs=", "hidden_size=", "lr=", "ray"])
+                                    "epochs=", "hidden_size=", "lr=", "ray", "embedder="])
     except getopt.GetoptError as err:
         # print help information and exit:
         print(err)
@@ -318,6 +318,8 @@ def parse_args(args):
     assert (bidirectional and hidden_size % 2 == 0) or (not bidirectional), "hidden size must be even if " \
                                                                             "--bidirectional is used "
 
+    embedder = str(opts.get("--embedder", "none"))
+
     lr = float(opts.get("--lr", 0.001))
     assert lr > 0, "learning rate should be greater than 0"
 
@@ -342,6 +344,7 @@ def parse_args(args):
     res["hidden_size"] = hidden_size
     res["lr"] = lr
     res["ray"] = ray
+    res["embedder"] = embedder
 
     print("-------------")
     print("Running with the following params:")
@@ -384,8 +387,9 @@ def generate_model_and_transformers(params, class_dict):
     if params["c2v"] is not None:
         c2v_vocab, c2v_weights = w2v_matrix_vocab_generator(params["c2v"])
 
-    init_data_transform = data_manager.InitTransform(w2v_vocab, class_dict, c2v_vocab)
-    drop_data_transform = data_manager.DropTransform(0.001, w2v_vocab["<UNK>"], w2v_vocab["<padding>"])
+    keep_tokens = params["embedder"] != "none"
+    init_data_transform = data_manager.InitTransform(w2v_vocab, class_dict, c2v_vocab, keep_tokens=keep_tokens)
+    drop_data_transform = data_manager.DropTransform(0.001, w2v_vocab["<UNK>"], w2v_vocab["<padding>"], keep_tokens=keep_tokens)
 
     # needed for some models, given their architecture, i.e. CONV
     padded_sentence_length = 50
@@ -395,7 +399,7 @@ def generate_model_and_transformers(params, class_dict):
         model = lstm.LSTM(device, w2v_weights, params["hidden_size"], len(class_dict),
                           params["drop"],
                           params["bidirectional"], not params["unfreeze"], params["embedding_norm"],
-                          c2v_weights, padded_word_length)
+                          c2v_weights, padded_word_length, embedder=params["embedder"])
     elif params["model"] == "gru":
         model = gru.GRU(device, w2v_weights, params["hidden_size"], len(class_dict),
                         params["drop"],

@@ -4,7 +4,6 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-
 class PytorchDataset(Dataset):
     """Dataset to import augmented data."""
 
@@ -219,18 +218,22 @@ def batch_sequence(batch, device):
     data = torch.cat(list_of_data_tensors, dim=0)
     list_of_labels_tensors = [sample["concepts"].unsqueeze(0) for sample in batch]
     labels = torch.cat(list_of_labels_tensors, dim=0)
+    list_of_pos_tensors = [sample["pos_enc"].unsqueeze(0) for sample in batch]
+    pos = torch.cat(list_of_pos_tensors, dim=0)
+    list_of_ner_tensors = [sample["ner_enc"].unsqueeze(0) for sample in batch]
+    ner = torch.cat(list_of_ner_tensors, dim=0)
     char_data = None
     if "chars" in batch[0]:
         list_of_char_data_tensors = [sample["chars"] for sample in batch]
         char_data = torch.cat(list_of_char_data_tensors, dim=0).to(device)
-    return data.to(device), labels.to(device), char_data
+    return data.to(device), labels.to(device), char_data, pos, ner
 
 
 class DropTransform(object):
     """ Transformer class to be passed to the pytorch dataset class to transform data at run time, it randomly
     drops word indexes to 'simulate' unknown words."""
 
-    def __init__(self, drop_chance, unk_idx, preserve_idx):
+    def __init__(self, drop_chance, unk_idx, preserve_idx, keep_tokens=False):
         """
         :param drop_chance: Chance of dropping a word.
         :param unk_idx: Which index to use in place of the one of the dropped word.
@@ -239,6 +242,7 @@ class DropTransform(object):
         self.drop_chance = drop_chance
         self.unk_idx = unk_idx
         self.preserve_idx = preserve_idx
+        self.keep_tokens = keep_tokens
 
     def _might_drop(self, idx):
         """
@@ -257,10 +261,15 @@ class DropTransform(object):
         :return:
         """
         tsample = dict()
-        seq = sample["tokens"].clone()
-        for i in range(len(seq)):
-            seq[i] = self._might_drop(sample["tokens"][i].item())
-        tsample["tokens"] = seq
+        if not self.keep_tokens:
+            seq = sample["tokens"].clone()
+            for i in range(len(seq)):
+                seq[i] = self._might_drop(sample["tokens"][i].item())
+            tsample["tokens"] = seq
+        else:
+            tsample["tokens"] = sample["tokens"]
+        tsample["pos_enc"] = sample["pos_enc"]
+        tsample["ner_enc"] = sample["ner_enc"]
         tsample["concepts"] = sample["concepts"]
         tsample["sequence_extra"] = sample["sequence_extra"]
         if "chars" in sample:
@@ -275,7 +284,7 @@ class InitTransform(object):
     """
 
     def __init__(self, w2v_vocab, class_vocab, c2v_vocab=None, sentence_length_cap=50, word_length_cap=30,
-                 add_matrix=True):
+                 add_matrix=True, keep_tokens=False):
         """
         :param w2v_vocab: Dict mapping strings to their w2v index (of the w2v_weights matrix passed to the constructor
         of the neural network class).
@@ -294,6 +303,34 @@ class InitTransform(object):
         self.pad_sentence_length = sentence_length_cap
         self.pad_word_length = word_length_cap
         self.add_matrix = add_matrix
+        self.keep_tokens = keep_tokens
+
+    def _to_padded_pos_enc(self, pos):
+
+        if len(pos) > self.pad_sentence_length:
+            pos = pos[:self.pad_sentence_length]
+        elif len(pos) < self.pad_sentence_length:
+            pos.extend([[0 for i in range(0,58)]] * (self.pad_sentence_length - len(pos)))
+
+        return torch.LongTensor(pos)
+
+    def _to_padded_ner_enc(self, ner):
+
+        if len(ner) > self.pad_sentence_length:
+            ner = ner[:self.pad_sentence_length]
+        elif len(ner) < self.pad_sentence_length:
+            ner.extend([[0 for i in range(0,18)]] * (self.pad_sentence_length - len(ner)))
+
+        return torch.LongTensor(ner)
+
+    def _to_padded_token_enc(self, tok):
+
+        if len(tok) > self.pad_sentence_length:
+            tok = tok[:self.pad_sentence_length]
+        elif len(tok) < self.pad_sentence_length:
+            tok.extend([[0 for i in range(0,len(tok[0]))]] * (self.pad_sentence_length - len(tok)))
+
+        return torch.LongTensor(tok)
 
     def _to_w2v_indexes(self, sentence):
         """
@@ -404,7 +441,12 @@ class InitTransform(object):
         :return:
         """
         tsample = dict()
-        tsample["tokens"] = self._to_w2v_indexes(sample["tokens"])
+        if not self.keep_tokens:
+            tsample["tokens"] = self._to_w2v_indexes(sample["tokens"])
+        else:
+            tsample["tokens"] = self._to_padded_token_enc(sample["tokens_emb"])
+        tsample["pos_enc"] = self._to_padded_pos_enc(sample["pos_enc"])
+        tsample["ner_enc"] = self._to_padded_ner_enc(sample["ner_enc"])
         tsample["concepts"] = self._to_vocab_indexes(self.class_vocab, sample["concepts"])
         if self.add_matrix:
             tsample["sequence_extra"] = self._to_matrix(sample["tokens"], self.w2v_vocab, self.pad_sentence_length)
