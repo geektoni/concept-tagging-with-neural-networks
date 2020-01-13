@@ -330,7 +330,7 @@ class InitTransform(object):
         elif len(tok) < self.pad_sentence_length:
             tok.extend([[0 for i in range(0,len(tok[0]))]] * (self.pad_sentence_length - len(tok)))
 
-        return torch.LongTensor(tok)
+        return torch.FloatTensor(tok)
 
     def _to_w2v_indexes(self, sentence):
         """
