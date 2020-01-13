@@ -6,7 +6,8 @@ import data_manager
 
 class LSTM(nn.Module):
     def __init__(self, device, w2v_weights, hidden_dim, tagset_size, drop_rate, bidirectional=False,
-                 freeze=True, embedding_norm=10., c2v_weights=None, pad_word_length=16, embedder="none"):
+                 freeze=True, embedding_norm=10., c2v_weights=None, pad_word_length=16, embedder="none",
+                 more_features=False):
         """
         :param device: Device to which to map tensors (GPU or CPU).
         :param w2v_weights: Matrix of w2v w2v_weights, ith row contains the embedding for the word mapped to the ith index, the
@@ -28,21 +29,25 @@ class LSTM(nn.Module):
         self.device = device
         self.hidden_dim = hidden_dim
         self.tagset_size = tagset_size
-        self.embedding_dim = w2v_weights.shape[1]+58+18
+        self.embedding_dim = w2v_weights.shape[1]
         self.w2v_weights = w2v_weights
         self.c2v_weights = c2v_weights
         self.bidirectional = bidirectional
         self.pad_word_length = pad_word_length
         self.bidirectional = bidirectional
         self.embedder = embedder
+        self.more_features = more_features
 
         self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(w2v_weights), freeze=freeze)
         self.embedding.max_norm = embedding_norm
 
         # Use the Elmo embedder instead of the classical ones.
-        if self.embedder != None:
+        if self.embedder != "none":
             self.embedding = None
             self.embedding_dim = 768 if self.embedder == "bert" else 1024
+
+        # We add the dimensionality of the other features (POS and spaCy).
+        if self.more_features:
             self.embedding_dim += 58+18
 
         self.drop_rate = drop_rate
@@ -138,7 +143,11 @@ class LSTM(nn.Module):
         data, labels, char_data, pos, ner = data_manager.batch_sequence(batch, self.device)
         if self.embedding is not None:
             data = self.embedding(data)
-        data = torch.cat([data.float(), pos.float(), ner.float()], 2)
+
+        # If we are using more features the we concatenate everything together
+        if self.more_features:
+            data = torch.cat([data, pos, ner], 2)
+
         data = self.drop(data)
 
         if self.c2v_weights is not None:

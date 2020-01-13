@@ -260,7 +260,7 @@ def parse_args(args):
         opts, args = getopt.getopt(args, "",
                                    ["train=", "test=", "w2v=", "model=", "c2v=", "write_results=", "save_model=", "dev",
                                     "help", "batch=", "bidirectional", "unfreeze", "decay=", "drop=", "embedding_norm=",
-                                    "epochs=", "hidden_size=", "lr=", "ray", "embedder="])
+                                    "epochs=", "hidden_size=", "lr=", "ray", "embedder=", "more-features"])
     except getopt.GetoptError as err:
         # print help information and exit:
         print(err)
@@ -320,6 +320,8 @@ def parse_args(args):
 
     embedder = str(opts.get("--embedder", "none"))
 
+    more_features = "--more-features" in opts
+
     lr = float(opts.get("--lr", 0.001))
     assert lr > 0, "learning rate should be greater than 0"
 
@@ -345,6 +347,7 @@ def parse_args(args):
     res["lr"] = lr
     res["ray"] = ray
     res["embedder"] = embedder
+    res["more_features"] = more_features
 
     print("-------------")
     print("Running with the following params:")
@@ -399,7 +402,7 @@ def generate_model_and_transformers(params, class_dict):
         model = lstm.LSTM(device, w2v_weights, params["hidden_size"], len(class_dict),
                           params["drop"],
                           params["bidirectional"], not params["unfreeze"], params["embedding_norm"],
-                          c2v_weights, padded_word_length, embedder=params["embedder"])
+                          c2v_weights, padded_word_length, embedder=params["embedder"], more_features=params["more_features"])
     elif params["model"] == "gru":
         model = gru.GRU(device, w2v_weights, params["hidden_size"], len(class_dict),
                         params["drop"],
