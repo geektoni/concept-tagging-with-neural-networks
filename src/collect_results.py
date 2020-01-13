@@ -41,10 +41,10 @@ def collect_results(dir):
                     res[name] = float(line.strip("\n"))
 
     values = np.array([v for v in res.values()])
-    mean, std = values.mean(), values.std()
+    mean, std, max_, min_,  = values.mean(), values.std(), values.max(), values.min()
     res = sorted(res.items(), key=operator.itemgetter(1), reverse=True)
     with open(dir + "f1.scores", "w") as output:
-        output.write("MEAN: %f, STD: %f\n" % (mean, std))
+        output.write("MEAN: %f, STD: %f, MAX: %f, MIN: %f\n" % (mean, std, max_, min_))
         for pair in res:
             output.write(pair[0] + " " + str(pair[1]) + "\n")
         output.close()
