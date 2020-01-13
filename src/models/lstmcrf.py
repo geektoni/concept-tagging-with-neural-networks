@@ -170,7 +170,7 @@ class CRF(nn.Module):
 
 class LstmCrf(nn.Module):
     def __init__(self, device, w2v_weights, tag_to_itx, hidden_dim, drop_rate, bidirectional=False, freeze=True,
-                 embedding_norm=6, c2v_weights=None, pad_word_length=16):
+                 embedding_norm=6, c2v_weights=None, pad_word_length=16, embedder="none", more_features=False):
 
         super(LstmCrf, self).__init__()
 
@@ -182,6 +182,8 @@ class LstmCrf(nn.Module):
         self.c2v_weights = c2v_weights
         self.pad_word_length = pad_word_length
         self.bidirectional = bidirectional
+        self.embedder = embedder
+        self.more_features = more_features
 
         self.drop_rate = drop_rate
         self.drop = nn.Dropout(self.drop_rate)
@@ -189,6 +191,15 @@ class LstmCrf(nn.Module):
         # embedding layer
         self.embeddings = nn.Embedding.from_pretrained(torch.FloatTensor(w2v_weights), freeze=freeze)
         self.embeddings.max_norm = embedding_norm
+
+        # Use the Elmo embedder instead of the classical ones.
+        if self.embedder != "none":
+            self.embeddings = None
+            self.embedding_dim = 768 if self.embedder == "bert" else 1024
+
+        # We add the dimensionality of the other features (POS and spaCy).
+        if self.more_features:
+            self.embedding_dim += 58 + 18
 
         # recurrent and mapping to tagset
         self.recurrent = nn.LSTM(input_size=self.embedding_dim,
@@ -310,10 +321,17 @@ class LstmCrf(nn.Module):
         :return: Labels scores of each token, size = (batch, sentence length, tagset size)
         """
         # n_feats, batch_size, seq_len = xs.size()
-        batch_size, seq_len = data.size()
+        if self.embedder != "none":
+            batch_size, seq_len, enc = data.size()
+        else:
+            batch_size, seq_len = data.size()
 
         # embed and drop
-        embedded = self.embeddings(data)
+        if self.embeddings is not None:
+            embedded = self.embeddings(data)
+        else:
+            embedded = data
+
         embedded = embedded.view(batch_size, seq_len, self.embedding_dim)
         embedded = self.drop(embedded)
 
@@ -364,8 +382,12 @@ class LstmCrf(nn.Module):
         return score
 
     def forward(self, batch):
-        data, labels, char_data = data_manager.batch_sequence(batch, self.device)
+        data, labels, char_data, pos, ner = data_manager.batch_sequence(batch, self.device)
         lengths = self.get_lengths(labels)
+
+        # If we are using more features the we concatenate everything together
+        if self.more_features:
+            data = torch.cat([data, pos, ner], 2)
 
         # get features and do predictions maximizing the sentence score using the crf
         feats = self.get_features_from_recurrent(data, char_data, lengths)
@@ -406,9 +428,13 @@ class LstmCrf(nn.Module):
         :param batch:
         :return:Pytorch loss.
         """
-        data, labels, char_data = data_manager.batch_sequence(batch, self.device)
+        data, labels, char_data, pos, ner = data_manager.batch_sequence(batch, self.device)
         lengths = self.get_lengths(labels)
         labels = self.get_labels(labels)
+
+        # If we are using more features the we concatenate everything together
+        if self.more_features:
+            data = torch.cat([data, pos, ner], 2)
 
         # get feats (scores for each label, for each word) from recurrent
         feats = self.get_features_from_recurrent(data, char_data, lengths)

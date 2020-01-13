@@ -390,9 +390,13 @@ def generate_model_and_transformers(params, class_dict):
     if params["c2v"] is not None:
         c2v_vocab, c2v_weights = w2v_matrix_vocab_generator(params["c2v"])
 
+    preserve_index = params["model"] == "lstm2ch"
+
     keep_tokens = params["embedder"] != "none"
-    init_data_transform = data_manager.InitTransform(w2v_vocab, class_dict, c2v_vocab, keep_tokens=keep_tokens)
-    drop_data_transform = data_manager.DropTransform(0.001, w2v_vocab["<UNK>"], w2v_vocab["<padding>"], keep_tokens=keep_tokens)
+    init_data_transform = data_manager.InitTransform(w2v_vocab, class_dict, c2v_vocab, keep_tokens=keep_tokens,
+                                                     preserve_indexes=preserve_index)
+    drop_data_transform = data_manager.DropTransform(0.001, w2v_vocab["<UNK>"], w2v_vocab["<padding>"], keep_tokens=keep_tokens,
+                                                     preserve_indexes=preserve_index)
 
     # needed for some models, given their architecture, i.e. CONV
     padded_sentence_length = 50
@@ -415,7 +419,8 @@ def generate_model_and_transformers(params, class_dict):
                         c2v_weights, padded_word_length)
     elif params["model"] == "lstm2ch":
         model = lstm2ch.LSTM2CH(device, w2v_weights, params["hidden_size"], len(class_dict), params["drop"],
-                                params["bidirectional"], params["embedding_norm"])
+                                params["bidirectional"], params["embedding_norm"], embedder=params["embedder"],
+                                more_features=params["more_features"])
     elif params["model"] == "encoder":
         tag_embedding_size = 20
         model = encoder.EncoderDecoderRNN(device, w2v_weights, tag_embedding_size, params["hidden_size"],
@@ -438,7 +443,8 @@ def generate_model_and_transformers(params, class_dict):
     elif params["model"] == "lstmcrf":
         model = lstmcrf.LstmCrf(device, w2v_weights, class_dict, params["hidden_size"], params["drop"],
                                 params["bidirectional"], not params["unfreeze"], params["embedding_norm"], c2v_weights,
-                                padded_word_length)
+                                padded_word_length, embedder=params["embedder"],
+                                more_features=params["more_features"])
 
     model = model.to(device)
 

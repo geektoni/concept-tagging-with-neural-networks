@@ -7,7 +7,7 @@ import data_manager
 
 class LSTM2CH(nn.Module):
     def __init__(self, device, w2v_weights, hidden_dim, tagset_size, drop_rate, bidirectional=False,
-                 embedding_norm=10.):
+                 embedding_norm=10., embedder="none", more_features=False):
         """
         :param device: Device to which to map tensors (GPU or CPU).
         :param w2v_weights: Matrix of w2v w2v_weights, ith row contains the embedding for the word mapped to the ith index, the
@@ -26,11 +26,26 @@ class LSTM2CH(nn.Module):
         self.embedding_dim = w2v_weights.shape[1]
         self.w2v_weights = w2v_weights
         self.bidirectional = bidirectional
+        self.embedder = embedder
+        self.more_features = more_features
 
         self.embedding_static = nn.Embedding.from_pretrained(torch.FloatTensor(w2v_weights), freeze=True)
         self.embedding_dyn = nn.Embedding(w2v_weights.shape[0], w2v_weights.shape[1], max_norm=embedding_norm,
                                           scale_grad_by_freq=True)
 
+        # Use the Elmo embedder instead of the classical ones.
+        if self.embedder != "none":
+            self.embedding_static = None
+            self.embedding_dim = 768 if self.embedder == "bert" else 1024
+
+        # We add the dimensionality of the other features (POS and spaCy).
+        if self.more_features:
+            self.embedding_dim += 58 + 18
+
+        # Create new dynamic embedding with the new size
+        if self.more_features or self.embedder != "none":
+            self.embedding_dyn = nn.Embedding(w2v_weights.shape[0], self.embedding_dim, max_norm=embedding_norm,
+                                              scale_grad_by_freq=True)
         self.drop_rate = drop_rate
         self.drop = nn.Dropout(self.drop_rate)
 
@@ -74,13 +89,18 @@ class LSTM2CH(nn.Module):
         hidden_dyn = self.init_hidden(len(batch))
 
         # embed using static embeddings and pass through the recurrent layer
-        data, labels, char_data = data_manager.batch_sequence(batch, self.device)
-        data_static = self.embedding_static(data)
+        data, labels, char_data, pos, ner, data_index = data_manager.batch_sequence(batch, self.device, True)
+
+        if self.embedding_static is not None:
+            data_static = self.embedding_static(data)
+        else:
+            data_static = data
+
         data_static = self.drop(data_static)
         lstm_out_static, hidden_static = self.recurrent_static(data_static, hidden_static)
 
         # embed using dynamic embeddings and pass through the recurrent layer
-        data_dynamic = self.embedding_dyn(data)
+        data_dynamic = self.embedding_dyn(data_index)
         data_dynamic = self.drop(data_dynamic)
         lstm_out_dyn, hidden_dyn = self.recurrent_dyn(data_dynamic, hidden_dyn)
 

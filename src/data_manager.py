@@ -207,7 +207,7 @@ class Data(object):
         return df
 
 
-def batch_sequence(batch, device):
+def batch_sequence(batch, device, preserve_indexes=False):
     """
     Given a batch return sequence data, labels and chars data (if present) in a "batched" way, as a tensor
     where the first dimension is the dimension of the batch.
@@ -226,6 +226,14 @@ def batch_sequence(batch, device):
     if "chars" in batch[0]:
         list_of_char_data_tensors = [sample["chars"] for sample in batch]
         char_data = torch.cat(list_of_char_data_tensors, dim=0).to(device)
+
+    if preserve_indexes:
+        list_of_data_tensors_index = [sample["tokens_indexes"].unsqueeze(0) for sample in batch]
+        data_index = torch.cat(list_of_data_tensors_index, dim=0)
+
+    if preserve_indexes:
+        return data.to(device), labels.to(device), char_data, pos, ner, data_index
+
     return data.to(device), labels.to(device), char_data, pos, ner
 
 
@@ -233,7 +241,7 @@ class DropTransform(object):
     """ Transformer class to be passed to the pytorch dataset class to transform data at run time, it randomly
     drops word indexes to 'simulate' unknown words."""
 
-    def __init__(self, drop_chance, unk_idx, preserve_idx, keep_tokens=False):
+    def __init__(self, drop_chance, unk_idx, preserve_idx, keep_tokens=False, preserve_indexes=False):
         """
         :param drop_chance: Chance of dropping a word.
         :param unk_idx: Which index to use in place of the one of the dropped word.
@@ -243,6 +251,7 @@ class DropTransform(object):
         self.unk_idx = unk_idx
         self.preserve_idx = preserve_idx
         self.keep_tokens = keep_tokens
+        self.preserve_indexes = preserve_indexes
 
     def _might_drop(self, idx):
         """
@@ -268,6 +277,13 @@ class DropTransform(object):
             tsample["tokens"] = seq
         else:
             tsample["tokens"] = sample["tokens"]
+
+        if self.preserve_indexes:
+            seq = sample["tokens_indexes"].clone()
+            for i in range(len(seq)):
+                seq[i] = self._might_drop(sample["tokens_indexes"][i].item())
+            tsample["tokens_indexes"] = seq
+
         tsample["pos_enc"] = sample["pos_enc"]
         tsample["ner_enc"] = sample["ner_enc"]
         tsample["concepts"] = sample["concepts"]
@@ -284,7 +300,7 @@ class InitTransform(object):
     """
 
     def __init__(self, w2v_vocab, class_vocab, c2v_vocab=None, sentence_length_cap=50, word_length_cap=30,
-                 add_matrix=True, keep_tokens=False):
+                 add_matrix=True, keep_tokens=False, preserve_indexes=False):
         """
         :param w2v_vocab: Dict mapping strings to their w2v index (of the w2v_weights matrix passed to the constructor
         of the neural network class).
@@ -304,6 +320,7 @@ class InitTransform(object):
         self.pad_word_length = word_length_cap
         self.add_matrix = add_matrix
         self.keep_tokens = keep_tokens
+        self.preserve_indexes = preserve_indexes
 
     def _to_padded_pos_enc(self, pos):
 
@@ -312,7 +329,7 @@ class InitTransform(object):
         elif len(pos) < self.pad_sentence_length:
             pos.extend([[0 for i in range(0,58)]] * (self.pad_sentence_length - len(pos)))
 
-        return torch.LongTensor(pos)
+        return torch.FloatTensor(pos)
 
     def _to_padded_ner_enc(self, ner):
 
@@ -321,7 +338,7 @@ class InitTransform(object):
         elif len(ner) < self.pad_sentence_length:
             ner.extend([[0 for i in range(0,18)]] * (self.pad_sentence_length - len(ner)))
 
-        return torch.LongTensor(ner)
+        return torch.FloatTensor(ner)
 
     def _to_padded_token_enc(self, tok):
 
@@ -445,6 +462,10 @@ class InitTransform(object):
             tsample["tokens"] = self._to_w2v_indexes(sample["tokens"])
         else:
             tsample["tokens"] = self._to_padded_token_enc(sample["tokens_emb"])
+
+        if self.preserve_indexes:
+            tsample["tokens_indexes"] = self._to_w2v_indexes(sample["tokens"])
+
         tsample["pos_enc"] = self._to_padded_pos_enc(sample["pos_enc"])
         tsample["ner_enc"] = self._to_padded_ner_enc(sample["ner_enc"])
         tsample["concepts"] = self._to_vocab_indexes(self.class_vocab, sample["concepts"])
