@@ -123,9 +123,9 @@ def evaluate_model(dev_data, model, class_dict, batch_size):
 
     # evaluate by calling the evaluation script then clean up
     print("Dev stats:")
-    write_predictions(y_true, y_true, y_predicted, "../output/dev_pred.txt", True, class_dict)
-    os.system("../output/conlleval.pl < ../output/dev_pred.txt | head -n2")
-    os.system("rm ../output/dev_pred.txt")
+    #write_predictions(y_true, y_true, y_predicted, "../output/dev_pred.txt", True, class_dict)
+    #os.system("../output/conlleval.pl < ../output/dev_pred.txt | head -n2")
+    #os.system("rm ../output/dev_pred.txt")
 
 def train_model_tune(config):
     return train_model(config["train_data"], config["model"], config["class_dict"],
@@ -133,7 +133,7 @@ def train_model_tune(config):
                        config["params"]["epochs"], config["decay"], ray=True)
 
 
-def train_model(train_data, model, class_dict, dev_data, batch_size, lr, epochs, decay=0.0, ray=False):
+def train_model(train_data, model, class_dict, dev_data, batch_size, lr, epochs, decay=0.0, ray=False, output_dir="../output"):
     """
     Trains a model and prints error, precision, recall and f1 while doing so, if dev data is passed
     the model is going to be evaluated on it every epoch.
@@ -209,10 +209,10 @@ def train_model(train_data, model, class_dict, dev_data, batch_size, lr, epochs,
         if not isinstance(model, lstmcrf.LstmCrf):
             print("Train stats:")
             # evaluate by calling the evaluation script then clean up
-            write_predictions(y_true, y_true, y_predicted, "../output/train_pred.txt", True,
+            write_predictions(y_true, y_true, y_predicted, "{}/train_pred.txt".format(output_dir), True,
                               class_dict)
-            os.system("../output/conlleval.pl < ../output/train_pred.txt | head -n2")
-            os.system("rm ../output/train_pred.txt")
+            os.system("../output/conlleval.pl < {}/train_pred.txt | head -n2".format(output_dir))
+            os.system("rm {}/train_pred.txt".format(output_dir))
 
         # if we passed dev train_data to it evaluate on it and report, else keep training
         if dev_data is not None:
@@ -504,8 +504,11 @@ if __name__ == "__main__":
             # Get a dataframe for analyzing trial results.
             df = analysis.dataframe()
         else:
+
+            output_dir = os.path.dirname(params["write_results"]) if params["write_results"] is not None else "../output"
+
             train_model(train_data, model, class_dict, None, params["batch"], params["lr"], params["epochs"],
-                    params["decay"])
+                    params["decay"], output_dir=output_dir)
 
     print("testing")
     model.eval()
