@@ -313,7 +313,7 @@ class LstmCrf(nn.Module):
                      torch.zeros(self.recurrent.num_layers, batch_size, self.hidden_dim).to(self.device)]
         return state
 
-    def get_features_from_recurrent(self, data, char_data, lengths):
+    def get_features_from_recurrent(self, data, char_data, lengths, pos, ner):
         """
         For each word get its scores for each possible label.
         :param data: Input sentences.
@@ -331,6 +331,10 @@ class LstmCrf(nn.Module):
             embedded = self.embeddings(data)
         else:
             embedded = data
+
+        # If we are using more features the we concatenate everything together
+        if self.more_features:
+            embedded = torch.cat([embedded, pos, ner], 2)
 
         embedded = embedded.view(batch_size, seq_len, self.embedding_dim)
         embedded = self.drop(embedded)
@@ -385,12 +389,8 @@ class LstmCrf(nn.Module):
         data, labels, char_data, pos, ner = data_manager.batch_sequence(batch, self.device)
         lengths = self.get_lengths(labels)
 
-        # If we are using more features the we concatenate everything together
-        if self.more_features:
-            data = torch.cat([data, pos, ner], 2)
-
         # get features and do predictions maximizing the sentence score using the crf
-        feats = self.get_features_from_recurrent(data, char_data, lengths)
+        feats = self.get_features_from_recurrent(data, char_data, lengths, pos, ner)
         scores, predictions = self.crf.viterbi_decode(feats, lengths)
 
         # pad predictions so that they match in length with padded labels
@@ -432,12 +432,8 @@ class LstmCrf(nn.Module):
         lengths = self.get_lengths(labels)
         labels = self.get_labels(labels)
 
-        # If we are using more features the we concatenate everything together
-        if self.more_features:
-            data = torch.cat([data, pos, ner], 2)
-
         # get feats (scores for each label, for each word) from recurrent
-        feats = self.get_features_from_recurrent(data, char_data, lengths)
+        feats = self.get_features_from_recurrent(data, char_data, lengths, pos, ner)
         # get score of sentence from crf
         norm_score = self.crf(feats, lengths)
 

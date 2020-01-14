@@ -33,26 +33,30 @@ class LSTM2CH(nn.Module):
         self.embedding_dyn = nn.Embedding(w2v_weights.shape[0], w2v_weights.shape[1], max_norm=embedding_norm,
                                           scale_grad_by_freq=True)
 
+        recurrent_dyn_dim = w2v_weights.shape[1]
+
         # Use the Elmo embedder instead of the classical ones.
         if self.embedder != "none":
             self.embedding_static = None
             self.embedding_dim = 768 if self.embedder == "bert" else 1024
 
+
         # We add the dimensionality of the other features (POS and spaCy).
         if self.more_features:
             self.embedding_dim += 58 + 18
+            recurrent_dyn_dim += 58 + 18
 
         # Create new dynamic embedding with the new size
-        if self.more_features or self.embedder != "none":
-            self.embedding_dyn = nn.Embedding(w2v_weights.shape[0], self.embedding_dim, max_norm=embedding_norm,
-                                              scale_grad_by_freq=True)
+        #if self.more_features or self.embedder != "none":
+        #    self.embedding_dyn = nn.Embedding(w2v_weights.shape[0], self.embedding_dim, max_norm=embedding_norm,
+        #                                      scale_grad_by_freq=True)
         self.drop_rate = drop_rate
         self.drop = nn.Dropout(self.drop_rate)
 
         # two "parallel" recurrent layers, 1 for static and 1 for dynamic embeddings
         self.recurrent_static = nn.LSTM(self.embedding_dim, self.hidden_dim // (2 if not bidirectional else 4),
                                         batch_first=True, bidirectional=bidirectional)
-        self.recurrent_dyn = nn.LSTM(self.embedding_dim, self.hidden_dim // (2 if not bidirectional else 4),
+        self.recurrent_dyn = nn.LSTM(recurrent_dyn_dim, self.hidden_dim // (2 if not bidirectional else 4),
                                      batch_first=True, bidirectional=bidirectional)
 
         self.hidden2tag = nn.Sequential(
@@ -96,11 +100,18 @@ class LSTM2CH(nn.Module):
         else:
             data_static = data
 
+        # add the new features
+        if self.more_features:
+            data_static = torch.cat([data_static, pos, ner], 2)
+
         data_static = self.drop(data_static)
         lstm_out_static, hidden_static = self.recurrent_static(data_static, hidden_static)
 
         # embed using dynamic embeddings and pass through the recurrent layer
         data_dynamic = self.embedding_dyn(data_index)
+        # add the new features
+        if self.more_features:
+            data_dynamic = torch.cat([data_dynamic, pos, ner], 2)
         data_dynamic = self.drop(data_dynamic)
         lstm_out_dyn, hidden_dyn = self.recurrent_dyn(data_dynamic, hidden_dyn)
 
