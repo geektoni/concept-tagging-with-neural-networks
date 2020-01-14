@@ -26,8 +26,9 @@ def worker_init(*args):
     :param args:
     :return:
     """
-    random.seed(1337)
-    np.random.seed(1337)
+    pass
+    #random.seed(1337)
+    #np.random.seed(1337)
 
 
 def predict(model, data_to_predict):
@@ -260,7 +261,7 @@ def parse_args(args):
         opts, args = getopt.getopt(args, "",
                                    ["train=", "test=", "w2v=", "model=", "c2v=", "write_results=", "save_model=", "dev",
                                     "help", "batch=", "bidirectional", "unfreeze", "decay=", "drop=", "embedding_norm=",
-                                    "epochs=", "hidden_size=", "lr=", "ray", "embedder=", "more-features"])
+                                    "epochs=", "hidden_size=", "lr=", "ray", "embedder=", "more-features", "seed="])
     except getopt.GetoptError as err:
         # print help information and exit:
         print(err)
@@ -327,6 +328,8 @@ def parse_args(args):
 
     ray = "--ray" in opts
 
+    seed = int(opts.get("--seed", 1))
+
     res = dict()
     res["train"] = train
     res["test"] = test
@@ -348,6 +351,7 @@ def parse_args(args):
     res["ray"] = ray
     res["embedder"] = embedder
     res["more_features"] = more_features
+    res["seed"] = seed
 
     print("-------------")
     print("Running with the following params:")
@@ -455,9 +459,12 @@ def generate_model_and_transformers(params, class_dict):
 
 
 if __name__ == "__main__":
-    random.seed(1337)
-    np.random.seed(1337)
     params = parse_args(sys.argv[1:])
+
+    # Set up the seed to ensure reproducibility
+    random.seed(int(params["seed"]))
+    np.random.seed(int(params["seed"]))
+    torch.manual_seed(int(params["seed"]))
 
     # load data
     print("loading data")
