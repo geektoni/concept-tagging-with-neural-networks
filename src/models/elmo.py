@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 
 class ElmoCombiner(torch.nn.Module):
     """
@@ -19,5 +18,4 @@ class ElmoCombiner(torch.nn.Module):
             self.W.requires_grad = False
 
     def forward(self, x):
-        print(self.W)
         return torch.sum(x * self.W[:, None, None], axis=1)
