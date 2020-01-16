@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import data_manager
+from models.elmo import ElmoCombiner
 
 class LSTM(nn.Module):
     def __init__(self, device, w2v_weights, hidden_dim, tagset_size, drop_rate, bidirectional=False,
@@ -38,13 +39,18 @@ class LSTM(nn.Module):
         self.embedder = embedder
         self.more_features = more_features
 
-        self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(w2v_weights), freeze=freeze)
-        self.embedding.max_norm = embedding_norm
-
         # Use the Elmo embedder instead of the classical ones.
         if self.embedder != "none":
-            self.embedding = None
+            if self.embedder == "elmo-combined":
+                self.embedding = ElmoCombiner()
+            elif self.embedder == "elmo":
+                self.embedding = ElmoCombiner(freeze=True)
+            else:
+                self.embedding = None
             self.embedding_dim = 768 if self.embedder == "bert" else 1024
+        else:
+            self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(w2v_weights), freeze=freeze)
+            self.embedding.max_norm = embedding_norm
 
         # We add the dimensionality of the other features (POS and spaCy).
         if self.more_features:

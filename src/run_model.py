@@ -16,9 +16,11 @@ import data_manager
 from data_manager import PytorchDataset, w2v_matrix_vocab_generator
 from models import lstm, gru, rnn, lstm2ch, encoder, attention, conv, fcinit, lstmcrf
 
-from ray import tune
-from ray.tune import track
-
+try:
+    from ray import tune
+    from ray.tune import track
+except:
+    print("Ray missing. It won't be possible to do hyperparameter tuning.")
 
 def worker_init(*args):
     """
@@ -395,10 +397,11 @@ def generate_model_and_transformers(params, class_dict):
         c2v_vocab, c2v_weights = w2v_matrix_vocab_generator(params["c2v"])
 
     preserve_index = params["model"] == "lstm2ch"
+    preserve_elmo = params["embedder"] == "elmo-combined" or params["embedder"] == "elmo"
 
     keep_tokens = params["embedder"] != "none"
     init_data_transform = data_manager.InitTransform(w2v_vocab, class_dict, c2v_vocab, keep_tokens=keep_tokens,
-                                                     preserve_indexes=preserve_index)
+                                                     preserve_indexes=preserve_index, preserve_elmo=preserve_elmo)
     drop_data_transform = data_manager.DropTransform(0.001, w2v_vocab["<UNK>"], w2v_vocab["<padding>"], keep_tokens=keep_tokens,
                                                      preserve_indexes=preserve_index)
 
@@ -468,8 +471,8 @@ if __name__ == "__main__":
 
     # load data
     print("loading data")
-    train_df = pd.read_pickle(params["train"])
-    test_df = pd.read_pickle(params["test"])
+    train_df = pd.read_pickle(params["train"], compression="bz2")
+    test_df = pd.read_pickle(params["test"], compression="bz2")
     class_dict = generate_class_dict(train_df, test_df)
 
     # build model and data transformers based on arguments
@@ -477,16 +480,6 @@ if __name__ == "__main__":
 
     train_data = PytorchDataset(train_df, init_data_transform, run_data_transform)
     test_data = PytorchDataset(test_df, init_data_transform)  # notice that there is no run_data_transform for test data
-
-    search_space = {
-        "train_data": train_data,
-        "model": model,
-        "class_dict": class_dict,
-        "test_data": test_data,
-        "params": params,
-        "lr": tune.grid_search([0.0001, 0.001, 0.01, 0.1]),
-        "decay": tune.grid_search([0.0001, 0.001, 0.01, 0.1])
-    }
 
     if params["dev"]:
         print("training in dev mode")
@@ -496,6 +489,17 @@ if __name__ == "__main__":
         print("training")
 
         if params["ray"]:
+
+            search_space = {
+                "train_data": train_data,
+                "model": model,
+                "class_dict": class_dict,
+                "test_data": test_data,
+                "params": params,
+                "lr": tune.grid_search([0.0001, 0.001, 0.01, 0.1]),
+                "decay": tune.grid_search([0.0001, 0.001, 0.01, 0.1])
+            }
+
             analysis = tune.run(
                 train_model_tune, config=search_space)
 

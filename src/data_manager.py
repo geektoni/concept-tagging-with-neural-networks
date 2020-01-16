@@ -207,15 +207,20 @@ class Data(object):
         return df
 
 
-def batch_sequence(batch, device, preserve_indexes=False):
+def batch_sequence(batch, device, preserve_indexes=False, preserve_elmo=False):
     """
     Given a batch return sequence data, labels and chars data (if present) in a "batched" way, as a tensor
     where the first dimension is the dimension of the batch.
     :param batch: List of sample points, each sample point should contain "tokens" and "concepts" data, list
     of integers, it may also contain "chars" data, which is a list of integers.
     """
-    list_of_data_tensors = [sample["tokens"].unsqueeze(0) for sample in batch]
-    data = torch.cat(list_of_data_tensors, dim=0)
+    if not preserve_elmo:
+        list_of_data_tensors = [sample["tokens"].unsqueeze(0) for sample in batch]
+        data = torch.cat(list_of_data_tensors, dim=0)
+    else:
+        list_of_data_tensors = [sample["tokens"] for sample in batch]
+        data = torch.cat(list_of_data_tensors, dim=0)
+
     list_of_labels_tensors = [sample["concepts"].unsqueeze(0) for sample in batch]
     labels = torch.cat(list_of_labels_tensors, dim=0)
     list_of_pos_tensors = [sample["pos_enc"].unsqueeze(0) for sample in batch]
@@ -300,7 +305,7 @@ class InitTransform(object):
     """
 
     def __init__(self, w2v_vocab, class_vocab, c2v_vocab=None, sentence_length_cap=50, word_length_cap=30,
-                 add_matrix=True, keep_tokens=False, preserve_indexes=False):
+                 add_matrix=True, keep_tokens=False, preserve_indexes=False, preserve_elmo=False):
         """
         :param w2v_vocab: Dict mapping strings to their w2v index (of the w2v_weights matrix passed to the constructor
         of the neural network class).
@@ -321,6 +326,7 @@ class InitTransform(object):
         self.add_matrix = add_matrix
         self.keep_tokens = keep_tokens
         self.preserve_indexes = preserve_indexes
+        self.preserve_elmo = preserve_elmo
 
     def _to_padded_pos_enc(self, pos):
 
@@ -348,6 +354,20 @@ class InitTransform(object):
             tok.extend([[0 for i in range(0,len(tok[0]))]] * (self.pad_sentence_length - len(tok)))
 
         return torch.FloatTensor(tok)
+
+    def _to_padded_token_enc_elmo(self, tok_):
+
+        total_levels = []
+        for i in range(0, len(tok_)):
+            tok = tok_[i]
+            if len(tok) > self.pad_sentence_length:
+                tok = tok[:self.pad_sentence_length]
+            elif len(tok) < self.pad_sentence_length:
+                base = [[0.0 for i in range(0,len(tok[0]))]]
+                tok = np.concatenate((tok, np.array(base * (self.pad_sentence_length - len(tok)))),axis=0)
+            total_levels.append(tok)
+
+        return torch.FloatTensor(total_levels)
 
     def _to_w2v_indexes(self, sentence):
         """
@@ -461,7 +481,10 @@ class InitTransform(object):
         if not self.keep_tokens:
             tsample["tokens"] = self._to_w2v_indexes(sample["tokens"])
         else:
-            tsample["tokens"] = self._to_padded_token_enc(sample["tokens_emb"])
+            if self.preserve_elmo:
+                tsample["tokens"] = self._to_padded_token_enc_elmo(sample["tokens_emb"])
+            else:
+                tsample["tokens"] = self._to_padded_token_enc(sample["tokens_emb"])
 
         if self.preserve_indexes:
             tsample["tokens_indexes"] = self._to_w2v_indexes(sample["tokens"])
