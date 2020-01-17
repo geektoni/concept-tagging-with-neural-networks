@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 
 import data_manager
+from models.elmo import ElmoCombiner
 
 
 # recurrent-crf implementation, heavily inspired by the pytorch tutorial and by kaniblu, the CRF class is almost
@@ -188,14 +189,18 @@ class LstmCrf(nn.Module):
         self.drop_rate = drop_rate
         self.drop = nn.Dropout(self.drop_rate)
 
-        # embedding layer
-        self.embeddings = nn.Embedding.from_pretrained(torch.FloatTensor(w2v_weights), freeze=freeze)
-        self.embeddings.max_norm = embedding_norm
-
         # Use the Elmo embedder instead of the classical ones.
         if self.embedder != "none":
-            self.embeddings = None
+            if self.embedder == "elmo-combined":
+                self.embedding = ElmoCombiner()
+            elif self.embedder == "elmo":
+                self.embedding = ElmoCombiner(freeze=True)
+            else:
+                self.embedding = None
             self.embedding_dim = 768 if self.embedder == "bert" else 1024
+        else:
+            self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(w2v_weights), freeze=freeze)
+            self.embedding.max_norm = embedding_norm
 
         # We add the dimensionality of the other features (POS and spaCy).
         if self.more_features:
@@ -322,13 +327,16 @@ class LstmCrf(nn.Module):
         """
         # n_feats, batch_size, seq_len = xs.size()
         if self.embedder != "none":
-            batch_size, seq_len, enc = data.size()
+            if self.embedder == "elmo" or self.embedder == "elmo-combined":
+                batch_size, elmo_layers_number, seq_len, enc = data.size()
+            else:
+                batch_size, seq_len, enc = data.size()
         else:
             batch_size, seq_len = data.size()
 
         # embed and drop
-        if self.embeddings is not None:
-            embedded = self.embeddings(data)
+        if self.embedding is not None:
+            embedded = self.embedding(data)
         else:
             embedded = data
 
